@@ -1,76 +1,127 @@
-package topcoder
+package topcoder_test
 
 import (
+	"strings"
 	"testing"
 
-	"github.com/tamnd/any-cli/kit"
+	"github.com/tamnd/topcoder-cli/topcoder"
 )
 
-// These tests are offline: they exercise the URI driver's pure string functions
-// and the host wiring (mint, body, resolve), which need no network. The client's
-// HTTP behaviour is covered in topcoder_test.go.
-
-func TestDomainInfo(t *testing.T) {
-	info := Domain{}.Info()
-	if info.Scheme != "topcoder" {
-		t.Errorf("Scheme = %q, want topcoder", info.Scheme)
-	}
-	if len(info.Hosts) == 0 || info.Hosts[0] != Host {
-		t.Errorf("Hosts = %v, want [%s]", info.Hosts, Host)
-	}
-	if info.Identity.Binary != "tc" {
-		t.Errorf("Identity.Binary = %q, want tc", info.Identity.Binary)
-	}
-}
-
-func TestClassify(t *testing.T) {
-	cases := []struct{ in, typ, id string }{
-		{"wiki/Go", "page", "wiki/Go"},
-		{"/about/", "page", "about"},
-		{"https://" + Host + "/team/contact", "page", "team/contact"},
-	}
-	for _, tc := range cases {
-		typ, id, err := Domain{}.Classify(tc.in)
-		if err != nil || typ != tc.typ || id != tc.id {
-			t.Errorf("Classify(%q) = (%q, %q, %v), want (%q, %q, nil)",
-				tc.in, typ, id, err, tc.typ, tc.id)
-		}
-	}
-}
-
-func TestLocate(t *testing.T) {
-	got, err := Domain{}.Locate("page", "wiki/Go")
-	want := "https://" + Host + "/wiki/Go"
-	if err != nil || got != want {
-		t.Errorf("Locate = (%q, %v), want (%q, nil)", got, err, want)
-	}
-}
-
-// TestHostWiring mounts the driver in a kit Host (the runtime ant drives) and
-// checks the round trip: a record mints to its URI, its body is readable, and a
-// bare id resolves back to the same URI. The init in domain.go registers the
-// domain, so kit.Open finds it.
-func TestHostWiring(t *testing.T) {
-	h, err := kit.Open()
+func TestClassifyUUID(t *testing.T) {
+	d := topcoder.Domain{}
+	uriType, id, err := d.Classify("3e4c6634-a6d4-43ff-a8bc-5a05ac7cb7a5")
 	if err != nil {
 		t.Fatal(err)
 	}
+	if uriType != "challenge" {
+		t.Errorf("type = %q, want challenge", uriType)
+	}
+	if id != "3e4c6634-a6d4-43ff-a8bc-5a05ac7cb7a5" {
+		t.Errorf("id = %q", id)
+	}
+}
 
-	p := &Page{ID: "wiki/Go", URL: "https://" + Host + "/wiki/Go", Title: "Go", Body: "Go is a language."}
-	u, err := h.Mint(p)
+func TestClassifyHandle(t *testing.T) {
+	d := topcoder.Domain{}
+	uriType, id, err := d.Classify("rng_58")
 	if err != nil {
-		t.Fatalf("Mint: %v", err)
+		t.Fatal(err)
 	}
-	if want := "topcoder://page/wiki/Go"; u.String() != want {
-		t.Errorf("Mint = %q, want %q", u.String(), want)
+	if uriType != "member" {
+		t.Errorf("type = %q, want member", uriType)
 	}
+	if id != "rng_58" {
+		t.Errorf("id = %q, want rng_58", id)
+	}
+}
 
-	if body, ok := h.Body(p); !ok || body == "" {
-		t.Errorf("Body = (%q, %v), want non-empty", body, ok)
+func TestClassifyChallengeURL(t *testing.T) {
+	d := topcoder.Domain{}
+	uriType, id, err := d.Classify("https://www.topcoder.com/challenges/3e4c6634-a6d4-43ff-a8bc-5a05ac7cb7a5")
+	if err != nil {
+		t.Fatal(err)
 	}
+	if uriType != "challenge" {
+		t.Errorf("type = %q, want challenge", uriType)
+	}
+	if id != "3e4c6634-a6d4-43ff-a8bc-5a05ac7cb7a5" {
+		t.Errorf("id = %q", id)
+	}
+}
 
-	got, err := h.ResolveOn("topcoder", "about")
-	if err != nil || got.String() != "topcoder://page/about" {
-		t.Errorf("ResolveOn = (%q, %v), want topcoder://page/about", got.String(), err)
+func TestClassifyMemberURL(t *testing.T) {
+	d := topcoder.Domain{}
+	uriType, id, err := d.Classify("https://www.topcoder.com/members/tourist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uriType != "member" {
+		t.Errorf("type = %q, want member", uriType)
+	}
+	if id != "tourist" {
+		t.Errorf("id = %q, want tourist", id)
+	}
+}
+
+func TestClassifyLegacyID(t *testing.T) {
+	d := topcoder.Domain{}
+	uriType, id, err := d.Classify("30123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uriType != "challenge" {
+		t.Errorf("type = %q, want challenge", uriType)
+	}
+	if id != "30123456" {
+		t.Errorf("id = %q, want 30123456", id)
+	}
+}
+
+func TestClassifyEmptyInput(t *testing.T) {
+	d := topcoder.Domain{}
+	_, _, err := d.Classify("")
+	if err == nil {
+		t.Error("expected error for empty input")
+	}
+}
+
+func TestLocateChallenge(t *testing.T) {
+	d := topcoder.Domain{}
+	u, err := d.Locate("challenge", "abc-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(u, "/challenges/abc-123") {
+		t.Errorf("URL = %q, want /challenges/abc-123", u)
+	}
+}
+
+func TestLocateMember(t *testing.T) {
+	d := topcoder.Domain{}
+	u, err := d.Locate("member", "tourist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(u, "/members/tourist") {
+		t.Errorf("URL = %q, want /members/tourist", u)
+	}
+}
+
+func TestLocateUnknownType(t *testing.T) {
+	d := topcoder.Domain{}
+	_, err := d.Locate("unknown", "x")
+	if err == nil {
+		t.Error("expected error for unknown type")
+	}
+}
+
+func TestDomainInfoScheme(t *testing.T) {
+	d := topcoder.Domain{}
+	info := d.Info()
+	if info.Scheme != "topcoder" {
+		t.Errorf("Scheme = %q, want topcoder", info.Scheme)
+	}
+	if info.Identity.Binary != "tc" {
+		t.Errorf("Binary = %q, want tc", info.Identity.Binary)
 	}
 }
